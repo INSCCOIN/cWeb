@@ -51,9 +51,39 @@ static int fetch_file(const char *u, const char *path)
     if (!strncmp(u, "data:", 5))
         return -1;
     snprintf(cmd, sizeof cmd,
-             "curl -L --max-time 15 -sS -A 'cWeb/0.1' --max-filesize 400000 -o '%s' '%s' 2>/dev/null",
+             "curl -L --max-time 8 -sS -A 'cWeb/0.1' --max-filesize 120000 -o '%s' '%s' 2>/dev/null",
              path, u);
     return system(cmd) == 0 ? 0 : -1;
+}
+
+static int skip_img(const char *u)
+{
+    if (!u || !u[0] || !strncmp(u, "data:", 5) || !strncmp(u, "javascript:", 11))
+        return 1;
+    if (strstr(u, "favicon") || strstr(u, "1x1") || strstr(u, "pixel") ||
+        strstr(u, "tracker") || strstr(u, "spin.") || strstr(u, ".svg"))
+        return 1;
+    return 0;
+}
+
+static int img_magic_ok(const char *path)
+{
+    unsigned char b[12];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+    if (!f)
+        return 0;
+    n = fread(b, 1, 12, f);
+    fclose(f);
+    if (n >= 3 && b[0] == 0xff && b[1] == 0xd8 && b[2] == 0xff)
+        return 1;
+    if (n >= 8 && b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G')
+        return 1;
+    if (n >= 6 && b[0] == 'G' && b[1] == 'I' && b[2] == 'F')
+        return 1;
+    if (n >= 12 && !memcmp(b, "RIFF", 4) && !memcmp(b + 8, "WEBP", 4))
+        return 1;
+    return 0;
 }
 
 static int decode_gray(const char *path, unsigned char *pix)
@@ -82,17 +112,20 @@ static int decode_gray(const char *path, unsigned char *pix)
     return got == (size_t)(IMG_W * IMG_H);
 }
 
-static void load_images(void)
+static void load_one_image(int i)
 {
-    int i;
+    char path[128];
+    if (i < 0 || i >= page.nimg || page.img[i].ok)
+        return;
+    if (skip_img(page.img[i].href))
+        return;
     mkdir("/home/working/cweb-img", 0755);
-    for (i = 0; i < page.nimg; i++) {
-        char path[128];
-        snprintf(path, sizeof path, "/home/working/cweb-img/%d", i + 1);
-        page.img[i].ok = 0;
-        if (fetch_file(page.img[i].href, path) == 0)
-            page.img[i].ok = decode_gray(path, page.img[i].pix);
-    }
+    snprintf(path, sizeof path, "/home/working/cweb-img/%d", i + 1);
+    if (fetch_file(page.img[i].href, path) != 0)
+        return;
+    if (!img_magic_ok(path))
+        return;
+    page.img[i].ok = decode_gray(path, page.img[i].pix);
 }
 static char msg[96] = "g go  / search  b back  # follow  q";
 
@@ -175,8 +208,8 @@ static void load(const char *u)
             url_join(j, sizeof j, abs, page.img[i].href);
             snprintf(page.img[i].href, sizeof page.img[i].href, "%s", j);
         }
-        load_images();
         img_i = 0;
+        load_one_image(0);
     }
     snprintf(url, sizeof url, "%s", abs);
     push_hist(abs);
@@ -217,9 +250,13 @@ static void draw(void)
     getmaxyx(stdscr, h, w);
     nhit = 0;
     erase();
-    attron(COLOR_PAIR(1) | A_BOLD);
-    mvprintw(0, 0, "%-*.*s", w, w, " cWeb");
-    attroff(COLOR_PAIR(1) | A_BOLD);
+    {
+        char top[160];
+        snprintf(top, sizeof top, " cWeb  %s", page.title[0] ? page.title : "reader");
+        attron(COLOR_PAIR(1) | A_BOLD);
+        mvprintw(0, 0, "%-*.*s", w, w, top);
+        attroff(COLOR_PAIR(1) | A_BOLD);
+    }
     bx = 1;
     btn(1, &bx, "Back", -1);
     btn(1, &bx, "Go", -2);
@@ -370,8 +407,10 @@ static void do_id(int id)
     } else if (id == -4)
         link_mode ^= 1;
     else if (id == -5) {
-        if (page.nimg)
+        if (page.nimg) {
             img_i = (img_i + 1) % page.nimg;
+            load_one_image(img_i);
+        }
     } else if (id == -6)
         run = 0;
 }
@@ -391,13 +430,18 @@ static void on_mouse(void)
         off++;
         return;
     }
+    id = hit_at(e.y, e.x);
+    if (e.bstate & REPORT_MOUSE_POSITION) {
+        if (id > 0 && id <= page.nlink)
+            snprintf(msg, sizeof msg, "→ %s", page.link[id - 1].href);
+        return;
+    }
     if (!(e.bstate & (BUTTON1_CLICKED | BUTTON1_RELEASED | BUTTON1_PRESSED)))
         return;
-    id = hit_at(e.y, e.x);
     if (id)
         do_id(id);
     else if (e.y >= 3)
-        snprintf(msg, sizeof msg, "click a blue [n] link or a button");
+        snprintf(msg, sizeof msg, "tap [n]  or  Back Go Search Links");
 }
 
 static void search(const char *q)
