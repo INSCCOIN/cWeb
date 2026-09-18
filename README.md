@@ -68,6 +68,19 @@ Needs a real TTY (the deck console or PuTTY). Not a framebuffer toy; do not expe
 
 Status line: `N links  M img  <title>`.
 
+
+## Mouse
+
+Needs a terminal that sends xterm mouse events (deck console or SSH with mouse reporting). Taps count as clicks if the tty maps them.
+
+- Click a cyan underlined `[n]` to open that link
+- Click a row in **Links** view
+- Toolbar: **Back · Go · Search · Links/Page · Img · Quit**
+- Click the blue URL bar to type an address
+- Wheel scrolls when the terminal reports buttons 4/5
+
+
+
 ## Images
 
 On each load, cWeb:
