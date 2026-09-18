@@ -92,24 +92,24 @@ static int decode_gray(const char *path, unsigned char *pix)
     FILE *p;
     size_t got;
     snprintf(cmd, sizeof cmd,
-             "ffmpeg -nostdin -loglevel error -i '%s' -vf scale=%d:%d -f rawvideo -pix_fmt gray - 2>/dev/null",
+             "ffmpeg -nostdin -loglevel error -i '%s' -vf scale=%d:%d -f rawvideo -pix_fmt rgb24 - 2>/dev/null",
              path, IMG_W, IMG_H);
     p = popen(cmd, "r");
-    if (!p)
-        return 0;
-    got = fread(pix, 1, IMG_W * IMG_H, p);
-    pclose(p);
-    if (got == (size_t)(IMG_W * IMG_H))
-        return 1;
-    snprintf(cmd, sizeof cmd,
-             "convert '%s' -resize %dx%d! -depth 8 gray:- 2>/dev/null",
-             path, IMG_W, IMG_H);
-    p = popen(cmd, "r");
-    if (!p)
-        return 0;
-    got = fread(pix, 1, IMG_W * IMG_H, p);
-    pclose(p);
-    return got == (size_t)(IMG_W * IMG_H);
+    if (p) {
+        unsigned char raw[IMG_W * IMG_H * 3];
+        got = fread(raw, 1, sizeof raw, p);
+        pclose(p);
+        if (got == sizeof raw) {
+            size_t i;
+            for (i = 0; i < (size_t)IMG_W * IMG_H; i++) {
+                int r = raw[i * 3], g = raw[i * 3 + 1], b = raw[i * 3 + 2];
+                int R = r > 110, G = g > 110, B = b > 110;
+                pix[i] = (unsigned char)((R || G || B) ? ((R ? 1 : 0) | (G ? 2 : 0) | (B ? 4 : 0)) : 0);
+            }
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void load_one_image(int i)
@@ -255,22 +255,24 @@ static void draw(void)
         snprintf(top, sizeof top, " cWeb  %s", page.title[0] ? page.title : "reader");
         attron(COLOR_PAIR(1) | A_BOLD);
         mvprintw(0, 0, "%-*.*s", w, w, top);
+        mvaddch(0, w > 2 ? w - 3 : 0, '[');
+        mvaddch(0, w > 1 ? w - 2 : 0, 'x');
+        mvaddch(0, w > 0 ? w - 1 : 0, ']');
         attroff(COLOR_PAIR(1) | A_BOLD);
+        hit_add(0, w > 3 ? w - 3 : 0, w, -6);
     }
-    bx = 1;
-    btn(1, &bx, "Back", -1);
-    btn(1, &bx, "Go", -2);
-    btn(1, &bx, "Search", -3);
-    btn(1, &bx, link_mode ? "Page" : "Links", -4);
-    btn(1, &bx, "Img", -5);
-    btn(1, &bx, "Quit", -6);
+    bx = 2;
+    btn(1, &bx, " <Back ", -1);
+    btn(1, &bx, " Go ", -2);
+    btn(1, &bx, " Search ", -3);
+    btn(1, &bx, link_mode ? " Page " : " Links ", -4);
+    btn(1, &bx, " Img ", -5);
     attron(COLOR_PAIR(5));
-    mvprintw(2, 0, "%-*.*s", w, w, url);
+    mvprintw(2, 0, " %-*.*s", w - 1, w - 1, url);
     attroff(COLOR_PAIR(5));
     hit_add(2, 0, w, -2);
 
     if (!link_mode) {
-        static const char ramp[] = " .:-=+*#%@";
         row = 3;
         if (page.nimg) {
             Img *im = &page.img[img_i < page.nimg ? img_i : 0];
@@ -283,13 +285,15 @@ static void draw(void)
             if (im->ok) {
                 int y, x;
                 for (y = 0; y < IMG_H && row < h - 1; y++, row++) {
-                    move(row, 0);
-                    for (x = 0; x < IMG_W && x < w; x++) {
-                        int v = im->pix[y * IMG_W + x] * 9 / 255;
-                        addch((unsigned char)ramp[v]);
+                    for (x = 0; x < IMG_W && x < w - 2; x++) {
+                        int idx = im->pix[y * IMG_W + x] & 7;
+                        attron(COLOR_PAIR(10 + idx));
+                        mvaddch(row, 1 + x, ' ');
+                        attroff(COLOR_PAIR(10 + idx));
                     }
                 }
-            }
+            } else
+                mvprintw(row++, 1, "(image queued — tap Img)");
         }
         s = page.body ? page.body : "(empty)";
         col = 0;
@@ -478,11 +482,19 @@ int main(int argc, char **argv)
     if (has_colors()) {
         start_color();
         use_default_colors();
-        init_pair(1, COLOR_BLACK, COLOR_CYAN);
-        init_pair(2, COLOR_CYAN, -1);
-        init_pair(3, COLOR_YELLOW, -1);
-        init_pair(4, COLOR_BLACK, COLOR_WHITE);
-        init_pair(5, COLOR_WHITE, COLOR_BLUE);
+        init_pair(1, COLOR_WHITE, COLOR_BLUE);
+        init_pair(2, COLOR_BLUE, COLOR_WHITE);
+        init_pair(3, COLOR_BLACK, COLOR_WHITE);
+        init_pair(4, COLOR_BLACK, COLOR_CYAN);
+        init_pair(5, COLOR_BLACK, COLOR_CYAN);
+        init_pair(10, COLOR_BLACK, COLOR_BLACK);
+        init_pair(11, COLOR_RED, COLOR_RED);
+        init_pair(12, COLOR_GREEN, COLOR_GREEN);
+        init_pair(13, COLOR_YELLOW, COLOR_YELLOW);
+        init_pair(14, COLOR_BLUE, COLOR_BLUE);
+        init_pair(15, COLOR_MAGENTA, COLOR_MAGENTA);
+        init_pair(16, COLOR_CYAN, COLOR_CYAN);
+        init_pair(17, COLOR_WHITE, COLOR_WHITE);
     }
     mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, NULL);
     mouseinterval(0);
