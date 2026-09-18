@@ -12,7 +12,7 @@ typedef struct {
 typedef struct {
     char href[MAX_HREF];
     char alt[MAX_TEXT];
-    unsigned char pix[IMG_W * IMG_H];
+    unsigned char pix[IMG_W * IMG_H]; /* 0-7 color index */
     int ok;
 } Img;
 
