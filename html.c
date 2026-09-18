@@ -149,7 +149,7 @@ int html_parse(const char *html, Page *out)
     const char *s = html ? html : "";
     char *buf = NULL;
     size_t len = 0, cap = 0;
-    int skip = 0, last_sp = 1, in_a = 0, ai = -1;
+    int skip = 0, hide = 0, last_sp = 1, in_a = 0, ai = -1;
     char href[MAX_HREF];
     memset(out, 0, sizeof *out);
     href[0] = 0;
@@ -211,12 +211,23 @@ int html_parse(const char *html, Page *out)
                 char *name = tag + slash;
                 while (*name == ' ')
                     name++;
-                if (tag_is(name, "script") || tag_is(name, "style") || tag_is(name, "noscript")) {
+                if (tag_is(name, "script") || tag_is(name, "style")) {
                     skip = !slash;
                     continue;
                 }
                 if (skip)
                     continue;
+                {
+                    char st[160];
+                    grab_attr(name, "style", st, sizeof st);
+                    if (!slash && (strcasestr(name, "hidden") || strcasestr(st, "display:none") ||
+                                   strcasestr(st, "display: none") || strcasestr(st, "visibility:hidden")))
+                        hide++;
+                    if (slash && hide)
+                        hide--;
+                    if (hide)
+                        continue;
+                }
                 if (!slash && tag_is(name, "title") && !out->title[0]) {
                     const char *te = strcasestr(s, "</title>");
                     if (te) {
@@ -233,6 +244,22 @@ int html_parse(const char *html, Page *out)
                     if (len && buf[len - 1] != '\n')
                         appch(&buf, &len, &cap, '\n');
                     last_sp = 1;
+                }
+                if (!slash && tag_is(name, "meta")) {
+                    char prop[48], cont[MAX_HREF];
+                    grab_attr(name, "property", prop, sizeof prop);
+                    if (!prop[0])
+                        grab_attr(name, "name", prop, sizeof prop);
+                    grab_attr(name, "content", cont, sizeof cont);
+                    if (!strcasecmp(prop, "og:image") && cont[0] && out->nimg < MAX_IMG) {
+                        Img *im = &out->img[out->nimg];
+                        memset(im, 0, sizeof *im);
+                        snprintf(im->href, sizeof im->href, "%s", cont);
+                        snprintf(im->alt, sizeof im->alt, "og");
+                        out->nimg++;
+                    }
+                    if (!strcasecmp(prop, "og:title") && cont[0] && !out->title[0])
+                        snprintf(out->title, sizeof out->title, "%s", cont);
                 }
                 if (!slash && tag_is(name, "img") && out->nimg < MAX_IMG) {
                     Img *im = &out->img[out->nimg];
